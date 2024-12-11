@@ -1,0 +1,133 @@
+This JEP promotes the Foreign Function & Memory API (FFM API) from the incubator stage to the preview stage. The Foreign Function & Memory API (FFM API) resides in the java.lang.foreign package of the java.base module.
+
+3.1 Below example shows how to use the Foreign Function & Memory API (FFM API) to call the standard C library radixsort to sort an array of strings.
+
+
+int radixsort(const unsigned char **base, int nmemb,
+  const unsigned	char *table, unsigned endbyte);
+
+JEP424_SORT.java
+
+package com.mkyong.java19.jep424;
+
+import java.lang.foreign.FunctionDescriptor;
+import java.lang.foreign.Linker;
+import java.lang.foreign.MemoryAddress;
+import java.lang.foreign.MemorySegment;
+import java.lang.foreign.SegmentAllocator;
+import java.lang.foreign.SymbolLookup;
+import java.lang.foreign.ValueLayout;
+import java.lang.invoke.MethodHandle;
+
+import static java.lang.foreign.ValueLayout.*;
+
+public class JEP424_SORT {
+
+  public static void main(String[] args) throws Throwable {
+
+      // 1. Find foreign function on the C library path
+      Linker linker = Linker.nativeLinker();
+      SymbolLookup stdlib = linker.defaultLookup();
+
+      // 2. Allocate on-heap memory to store strings
+      String[] javaStrings = {"d", "z", "b", "c", "a"};
+
+      // 3. Allocate off-heap memory to store pointers
+      SegmentAllocator allocator = SegmentAllocator.implicitAllocator();
+      MemorySegment offHeap = allocator.allocateArray(ValueLayout.ADDRESS, javaStrings.length);
+
+      // 4. Copy the strings from on-heap to off-heap
+      for (int i = 0; i < javaStrings.length; i++) {
+
+          // Allocate a string off-heap, then store a pointer to it
+          MemorySegment cString = allocator.allocateUtf8String(javaStrings[i]);
+          offHeap.setAtIndex(ValueLayout.ADDRESS, i, cString);
+      }
+
+      MethodHandle radixSort = linker.downcallHandle(
+              stdlib.lookup("radixsort").orElseThrow(),
+              FunctionDescriptor.ofVoid(ADDRESS, JAVA_INT, ADDRESS, JAVA_CHAR));
+
+      // 5. Sort the off-heap data by calling the foreign function
+      radixSort.invoke(offHeap, javaStrings.length, MemoryAddress.NULL, '\0');
+
+      // 6. Copy the (reordered) strings from off-heap to on-heap
+      for (int i = 0; i < javaStrings.length; i++) {
+          MemoryAddress cStringPtr = offHeap.getAtIndex(ValueLayout.ADDRESS, i);
+          javaStrings[i] = cStringPtr.getUtf8String(0);
+      }
+
+      //print sort result
+      for (String javaString : javaStrings) {
+          System.out.println(javaString);
+      }
+
+  }
+
+}
+
+Output
+
+Terminal
+
+WARNING: A restricted method in java.lang.foreign.Linker has been called
+WARNING: java.lang.foreign.Linker::nativeLinker has been called by the unnamed module
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for this module
+
+a
+b
+c
+d
+z
+
+3.2 Below example shows how to use the Foreign Function & Memory API (FFM API) to call the standard C library strlen to return the string’s length.
+
+
+size_t strlen(const char *s);
+
+JEP424_STRLEN.java
+
+package com.mkyong.java19.jep424;
+
+import java.lang.foreign.*;
+import java.lang.invoke.MethodHandle;
+
+import static java.lang.foreign.ValueLayout.ADDRESS;
+import static java.lang.foreign.ValueLayout.JAVA_LONG;
+
+public class JEP424_STRLEN {
+
+  public static void main(String[] args) throws Throwable {
+
+      String input = "Hello World";
+
+      // 1. Find foreign function on the C library path
+      SymbolLookup stdlib = Linker.nativeLinker().defaultLookup();
+
+      // 2. Get a handle to the "strlen" function in the C standard library
+      MethodHandle methodHandle = Linker.nativeLinker().downcallHandle(
+              stdlib.lookup("strlen").orElseThrow(),
+              FunctionDescriptor.of(JAVA_LONG, ADDRESS));
+
+      // 3. Allocate off-heap memory to store strings
+      MemorySegment memorySegment = SegmentAllocator
+              .implicitAllocator().allocateUtf8String(input);
+
+      // 4. Runs the foreign function "strlen"
+      long length = (long) methodHandle.invoke(memorySegment);
+
+      System.out.println("length = " + length);
+
+  }
+
+}
+
+Output
+
+Terminal
+
+WARNING: A restricted method in java.lang.foreign.Linker has been called
+WARNING: java.lang.foreign.Linker::nativeLinker has been called by the unnamed module
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for this module
+
+length = 11

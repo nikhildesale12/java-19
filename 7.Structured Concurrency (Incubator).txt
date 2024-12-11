@@ -1,0 +1,79 @@
+This JEP introduces Structured Concurrency APIs to simplify multithreaded programming.
+
+UnStructured Concurrency API
+Review the below multithreaded code.
+
+JEP428.java
+
+package com.mkyong.java19.jep428;
+
+import java.time.Duration;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+
+public class JEP428 {
+
+  public static void main(String[] args) throws ExecutionException, InterruptedException {
+      JEP428 obj = new JEP428();
+      obj.handleUnStructureAPI();
+  }
+
+  Response handleUnStructureAPI() throws ExecutionException, InterruptedException {
+      try (var executor = Executors.newFixedThreadPool(10)) {
+          Future<String> user = executor.submit(this::findUser);
+          Future<Integer> order = executor.submit(this::fetchOrder);
+          String theUser = user.get();   // Join findUser
+          int theOrder = order.get();  // Join fetchOrder
+          return new Response(theUser, theOrder);
+      }
+  }
+
+  private String findUser() throws InterruptedException {
+      Thread.sleep(Duration.ofSeconds(1));
+      return "mkyong";
+  }
+
+  private Integer fetchOrder() throws InterruptedException {
+      Thread.sleep(Duration.ofSeconds(1));
+      return 1;
+  }
+
+  record Response(String x, int y) {
+  }
+}
+
+The Future tasks findUser() and fetchOrder() execute concurrency, and each task can succeed or fail (throw exception) independently.
+
+If findUser() throws an exception, the fetchOrder() will continue running it, wasting resources.
+If fetchOrder() throws an exception, the findUser() will continue running it, wasting resources.
+Assume findUser() takes 1 minute to finish, and the fetchOrder() is failed immediately, but we have no ways to tell handle() to stop or cancel the entire handle() process, the handle() will still wait 1 minute to process it.
+Structured Concurrency API
+This JEP introduces Structured Concurrency API StructuredTaskScope, which treats multiple tasks running in different threads as a single unit of work.
+
+
+import jdk.incubator.concurrent.StructuredTaskScope;
+
+  //...
+
+  Response handleStructureAPI() throws ExecutionException, InterruptedException {
+      try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
+          Future<String> user = scope.fork(this::findUser);
+          Future<Integer> order = scope.fork(this::fetchOrder);
+
+          scope.join();           // Join both forks
+          scope.throwIfFailed();  // ... and propagate errors
+
+          // Here, both forks have succeeded, so compose their results
+          return new Response(user.resultNow(), order.resultNow());
+      }
+  }
+
+The StructuredTaskScope.ShutdownOnFailure() means if either the findUser() or fetchOrder() fails, the other will cancel if it has not yet been completed.
+
+The StructuredTaskScope is in incubator module, and we can compile and run the program with the below commands:
+
+Terminal
+
+  javac --release XX --enable-preview --add-modules jdk.incubator.concurrent Main.java
+  java --enable-preview --add-modules jdk.incubator.concurrent Main

@@ -1,0 +1,52 @@
+This JEP introduces virtual threads, a lightweight implementation of threads provided by the JDK instead of the OS. The number of virtual threads can be much larger than the number of OS threads. These virtual threads help increase the throughput of the concurrent applications.
+
+Let’s review a case study:
+
+An application with an average latency of 100ms runs on a CPU containing 10 cores, 20 OS threads, and processing 20 requests concurrently, which will fully utilize the 20 OS threads.
+
+Terminal
+
+    This application can achieve a throughput of 200 requests per second.
+
+Let’s say we scale the throughput to 400 requests per second.
+
+We either need to process 40 requests concurrently (upgrade CPU processor to support 40 OS threads) or reduce the average latency of the application to 50ms; The limit is always the OS threads factor or CPU processor, which makes the application’s throughput hardly scale up.
+
+Platform Threads, OS Threads, and Virtual Threads
+In Java, every instance of java.lang.Thread is a platform thread that runs Java code on an underlying OS thread. The number of platform threads is limited to the number of OS threads, like in the above case study.
+
+A Virtual Thread is also an instance of java.lang.Thread, but it runs Java code on the same OS thread and shares it effectively, which makes the number of virtual threads can be much larger than the number of OS threads.
+
+Because the number of OS threads does not limit virtual threads, we can quickly increase the concurrent requests to achieve higher throughput.
+
+For example, the same existing CPU contains 10 cores and 20 OS threads, and we can convert the platform threads to virtual threads and increase concurrent requests to 40 to achieve a throughput of 400 requests per second.
+
+Terminal
+
+    This application can achieve a throughput of 400 requests per second.
+
+The below example will run 10k tasks on Virtual Threads, and the modern CPU may take less than 1 second to finish it.
+
+
+  // finish within 1 second
+  try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      IntStream.range(0, 10_000).forEach(i -> {
+          executor.submit(() -> {
+              Thread.sleep(Duration.ofSeconds(1));
+              return i;
+          });
+      });
+  }
+
+Try running the same code using the classic newFixedThreadPool, and we may need to manually terminal it because it will take a long time to finish.
+
+
+  // 10_000/20 = 500seconds, it takes 8 minutes and 33 seconds to finish it
+  try (var executor = Executors.newFixedThreadPool(20)) {
+      IntStream.range(0, 10_000).forEach(i -> {
+          executor.submit(() -> {
+              Thread.sleep(Duration.ofSeconds(1));
+              return i;
+          });
+      });
+  }
